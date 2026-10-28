@@ -66,6 +66,8 @@ class UserbotPool:
             api_hash=API_HASH,
             device_model="pyrogram",
             session_string=session_string,
+            sleep_threshold=30,
+            max_concurrent_transmissions=16,
         )
         try:
             await asyncio.wait_for(client.start(), timeout=START_TIMEOUT)

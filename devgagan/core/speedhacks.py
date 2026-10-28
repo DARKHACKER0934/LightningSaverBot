@@ -29,7 +29,7 @@ except ImportError:
     def md5():
         return _new("md5")
 
-DL_WORKERS = int(os.getenv("DL_WORKERS", "8"))
+DL_WORKERS = int(os.getenv("DL_WORKERS", "10"))
 DL_BLOCK = 8 * 1024 * 1024      # bytes per worker request range
 PARALLEL_MIN_SIZE = 12 * 1024 * 1024  # use parallel engine only for bigger files
 

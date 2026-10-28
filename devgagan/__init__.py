@@ -42,6 +42,6 @@ def create_app():
         bot_token=BOT_TOKEN,
         workers=32,
         sleep_threshold=30,
-        max_concurrent_transmissions=10,
+        max_concurrent_transmissions=16,
     )
     return app
