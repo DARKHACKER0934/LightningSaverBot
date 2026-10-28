@@ -23,9 +23,12 @@ from devgagan import app
 from devgagan.core.func import (
     progress_bar, video_metadata, normalize_link, _extract_frame_cv2,
 )
+from devgagan.core.speedhacks import fast_download, patch_upload_speed
 from devgagan.core.cache import file_id_cache, thumb_cache
 from devgagan.core.mongo import db as settings_db
 from config import LOG_GROUP
+
+patch_upload_speed()
 
 ENABLE_MEDIA_LOGGING = os.getenv("ENABLE_MEDIA_LOGGING", "false").strip().lower() in {"1", "true", "yes", "on"}
 
@@ -160,6 +163,14 @@ def media_kind(msg):
         return "animation"
     if msg.media == MessageMediaType.DOCUMENT:
         return "video_doc" if (msg.document.mime_type or "").startswith("video/") else "document"
+    return None
+
+
+def _media_of(msg):
+    for kind in ("audio", "document", "photo", "sticker", "animation", "video", "voice", "video_note"):
+        m = getattr(msg, kind, None)
+        if m is not None:
+            return m
     return None
 
 
@@ -389,9 +400,11 @@ async def _download_upload_media(client, upload_client, sender, target, msg, kin
     try:
         if edit is not None:
             await edit.edit("📥 **DOWNLOADING...**\n\n" + "░" * 12)
-        file = await client.download_media(
-            msg,
-            file_name=download_dir + os.sep,
+        media = _media_of(msg)
+        original_name = getattr(media, "file_name", "") or f"media_{int(time.time())}.{_ext_for(client, media) if media is not None else 'bin'}"
+        safe_name = os.path.basename(original_name.replace("/", "_").replace("\\", "_")) or "file"
+        file = await fast_download(
+            client, msg, os.path.join(download_dir, safe_name),
             progress=progress_bar,
             progress_args=("📥 **DOWNLOADING:**\n", edit, time.time()),
         )

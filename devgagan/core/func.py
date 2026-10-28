@@ -159,16 +159,27 @@ PROGRESS_TEMPLATE = (
     "⏳ **ETA** : `{eta}`"
 )
 
+_last_update = {}  # id(message) -> (time, bytes)
+
 
 async def progress_bar(current, total, ud_type, message, start):
-    """Throttled, smooth progress editor. Updates every ~3s or when done."""
+    """Throttled progress editor with INSTANT speed (delta-based, not average)."""
     now = time.time()
-    diff = now - start
-    if current != total and diff < 3:
+    key = id(message)
+    prev = _last_update.get(key)
+
+    if current != total and prev is not None and now - prev[0] < 2.5:
         return
+
     try:
         percentage = current * 100 / total
-        speed = current / diff if diff > 0 else 0
+        if prev is not None and now > prev[0]:
+            speed = (current - prev[1]) / (now - prev[0])
+        else:
+            speed = current / (now - start) if now > start else 0
+        if speed < 0:
+            speed = 0
+        _last_update[key] = (now, current)
         eta_seconds = int((total - current) / speed) if speed > 0 else 0
 
         text = PROGRESS_TEMPLATE.format(
@@ -183,6 +194,8 @@ async def progress_bar(current, total, ud_type, message, start):
             await message.edit(text=f"{ud_type}\n\n{text}")
         except Exception:
             pass
+        if current >= total:
+            _last_update.pop(key, None)
     except Exception:
         pass
 
