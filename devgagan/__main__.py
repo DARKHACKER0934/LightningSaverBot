@@ -3,6 +3,7 @@
 import asyncio
 import gc
 import importlib
+import os
 
 import psutil
 from pyrogram import idle
@@ -33,6 +34,23 @@ async def schedule_expiry_check():
         await asyncio.sleep(3600)  # Check every hour
 
 
+async def watchdog(app):
+    """Self-healing: if Telegram connection stays dead for 3 checks, restart
+    the process so the platform (Render/run.sh loop) brings up a fresh bot."""
+    fails = 0
+    while True:
+        await asyncio.sleep(60)
+        try:
+            await app.get_me()
+            fails = 0
+        except Exception as e:
+            fails += 1
+            print(f"⚠️ Watchdog: connection issue ({fails}/3): {type(e).__name__}: {e}")
+            if fails >= 3:
+                print("🔁 Watchdog: restarting bot process...")
+                os._exit(1)
+
+
 async def devggn_boot():
     # Construct the client INSIDE the running loop (Pyrogram binds self.loop
     # at construction time — creating it at import caused cross-loop crashes).
@@ -49,6 +67,7 @@ async def devggn_boot():
 
     asyncio.get_running_loop().create_task(schedule_expiry_check())
     asyncio.get_running_loop().create_task(optimize_memory())
+    asyncio.get_running_loop().create_task(watchdog(app))
     userbot_pool.start_janitor(asyncio.get_running_loop())
 
     await idle()
