@@ -1,0 +1,18 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Newsaverbot</title>
+  <style>
+    body { background: antiquewhite; display: flex; flex-direction: column; justify-content: space-between; min-height: 100vh; margin: 0; font-family: sans-serif; }
+    main { flex: 1; display: grid; place-items: center; padding: 24px; }
+    img { max-width: min(90vw, 640px); height: auto; border-radius: 8px; }
+    footer { text-align: center; padding: 14px; background: antiquewhite; font-size: 1.05em; }
+  </style>
+</head>
+<body>
+  <main><img src="{{ url_for('static', filename='gagan.png') }}" alt="Newsaverbot"></main>
+  <footer>Newsaverbot is running.</footer>
+</body>
+</html>
