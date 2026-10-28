@@ -4,3 +4,6 @@ __pycache__/
 *.session-journal
 .env
 output.txt
+bot.log
+bot.pid
+runsh.pid

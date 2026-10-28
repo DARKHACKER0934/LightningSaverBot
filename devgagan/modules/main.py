@@ -206,7 +206,7 @@ def _batch_target(link):
     return "public" if is_public else "userbot"
 
 
-async def _batch_loop(user_id, message, userbot, start_id, cl, cs, status_id, target, start_time):
+async def _batch_loop(user_id, message, userbot, start_id, cl, cs, status_id, start_time):
     pacer = SmartPacer()
     done = 0
     failed = 0
