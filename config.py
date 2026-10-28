@@ -17,7 +17,12 @@ API_ID = int(required("API_ID"))
 API_HASH = required("API_HASH")
 BOT_TOKEN = required("BOT_TOKEN")
 OWNER_ID = [int(value) for value in required("OWNER_ID").split()]
-MONGO_DB = required("MONGO_DB")
+MONGO_DB = required("MONGO_DB").strip()
+if not MONGO_DB.startswith(("mongodb://", "mongodb+srv://")):
+    raise RuntimeError(
+        f"MONGO_DB is not a valid MongoDB connection string (got: {MONGO_DB[:60]!r}...). "
+        "It must start with mongodb:// or mongodb+srv://"
+    )
 LOG_GROUP = required("LOG_GROUP")
 CHANNEL_ID = int(required("CHANNEL_ID"))
 FREEMIUM_LIMIT = int(os.getenv("FREEMIUM_LIMIT", "0"))
