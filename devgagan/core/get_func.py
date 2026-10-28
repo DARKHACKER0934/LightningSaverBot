@@ -13,6 +13,7 @@ import shutil
 import tempfile
 import time
 
+from pyrogram import raw, types
 from pyrogram.errors import (
     ChannelBanned, ChannelInvalid, ChannelPrivate, ChatIdInvalid, ChatInvalid,
     FloodWait, PeerIdInvalid, RPCError, ChatAdminRequired,
@@ -121,7 +122,11 @@ def _remove_configured_words(text, words):
 
 async def _build_caption(msg, sender):
     custom_caption = await get_user_caption_preference(sender)
-    final_caption = msg.caption or ''
+    # Use .markdown to preserve the original formatting (bold/italic/links)
+    try:
+        final_caption = msg.caption.markdown if msg.caption else ''
+    except Exception:
+        final_caption = msg.caption or ''
     final_caption = _remove_configured_words(final_caption, await load_delete_words(sender))
     for word, replace_word in (await load_replacement_words(sender)).items():
         final_caption = final_caption.replace(word, replace_word)
@@ -381,6 +386,30 @@ async def _copy_to_log_safely(message):
         print(f"Non-fatal log-group copy failure: {type(e).__name__}: {e}")
 
 
+async def get_topic_message(client, chat, topic_id, msg_id):
+    """Fetch a forum-topic message by its TOPIC-LOCAL id (as shown in links)."""
+    peer = await client.resolve_peer(chat)
+    r = await client.invoke(
+        raw.functions.messages.GetReplies(
+            peer=peer,
+            msg_id=topic_id,
+            offset_id=msg_id + 1,
+            offset_date=0,
+            add_offset=0,
+            limit=30,
+            max_id=0,
+            min_id=0,
+            hash=0,
+        )
+    )
+    users = {u.id: u for u in r.users}
+    chats = {c.id: c for c in r.chats}
+    for m in r.messages:
+        if getattr(m, "id", None) == msg_id:
+            return await types.Message._parse(client, m, users, chats, replies=0)
+    return None
+
+
 async def _pin_safely(message):
     try:
         await message.pin(both_sides=True)
@@ -447,8 +476,10 @@ async def _download_upload_media(client, upload_client, sender, target, msg, kin
 
 # ── Public link path (bot can read the channel) ──────────────────────────────
 
-async def copy_message_with_chat_id(client, sender, chat_id, message_id, upload_client=None, edit_id=None):
-    """client = reader, upload_client = sender (bot). Fast file_id path first."""
+async def copy_message_with_chat_id(client, sender, chat_id, message_id, upload_client=None, edit_id=None, topic=False, topic_id=None):
+    """client = reader, upload_client = sender (bot). Fast file_id path first.
+
+    topic=True fetches by topic-local message id (public/private forum topics)."""
     if upload_client is None:
         upload_client = client
     target_chat_id = user_chat_ids.get(sender, sender)
@@ -460,7 +491,13 @@ async def copy_message_with_chat_id(client, sender, chat_id, message_id, upload_
             edit = None
 
     try:
-        msg = await asyncio.wait_for(client.get_messages(chat_id, message_id), timeout=DOWNLOAD_TIMEOUT)
+        if topic:
+            msg = await asyncio.wait_for(
+                get_topic_message(client, chat_id, topic_id, message_id),
+                timeout=DOWNLOAD_TIMEOUT,
+            )
+        else:
+            msg = await asyncio.wait_for(client.get_messages(chat_id, message_id), timeout=DOWNLOAD_TIMEOUT)
 
         if not msg or msg.empty:
             if edit is not None:
@@ -586,20 +623,47 @@ async def get_msg(userbot, sender, edit_id, msg_link, i, message, keep_status=Fa
     if userbot is None:
         # ⚡ Public link — bot can read it directly (zero download fast path)
         parts = msg_link.split("/")
-        if len(parts) >= 2 and parts[-2].isdigit():
-            chat = parts[-3] if len(parts) >= 3 else parts[-2]
-        else:
-            chat = parts[-2] if len(parts) >= 2 else msg_link
+        if len(parts) >= 6 and parts[-2].isdigit():
+            # public topic group: t.me/username/TOPIC/msg_id
+            chat = parts[-3]
+            return await copy_message_with_chat_id(
+                app, sender, chat, msg_id, edit_id=edit_id,
+                topic=True, topic_id=int(parts[-2]),
+            )
+        chat = parts[-2] if len(parts) >= 2 else msg_link
         return await copy_message_with_chat_id(app, sender, chat, msg_id, edit_id=edit_id)
 
     try:
         parts = msg_link.split("/")
-        if 't.me/b/' not in msg_link:
+        topic_part = None
+        if 't.me/b/' in msg_link:
+            # bot link: t.me/b/bot_username/msg_id
+            chat = parts[-2]
+            msg = await asyncio.wait_for(userbot.get_messages(chat, msg_id), timeout=DOWNLOAD_TIMEOUT)
+        elif 't.me/c/' in msg_link:
+            # private channel/group
             chat = int('-100' + str(parts[parts.index('c') + 1]))
+            if len(parts) >= 7 and parts[-2].isdigit():
+                # private topic: t.me/c/xxx/TOPIC/msg_id → topic-local id
+                topic_part = int(parts[-2])
+                msg = await asyncio.wait_for(
+                    get_topic_message(userbot, chat, topic_part, msg_id),
+                    timeout=DOWNLOAD_TIMEOUT,
+                )
+            else:
+                msg = await asyncio.wait_for(userbot.get_messages(chat, msg_id), timeout=DOWNLOAD_TIMEOUT)
+        elif len(parts) >= 6 and parts[-2].isdigit():
+            # public topic group: t.me/username/TOPIC/msg_id → topic-local id
+            chat = parts[-3]
+            topic_part = int(parts[-2])
+            msg = await asyncio.wait_for(
+                get_topic_message(userbot, chat, topic_part, msg_id),
+                timeout=DOWNLOAD_TIMEOUT,
+            )
         else:
-            chat = msg_link.split("/")[-2]
-
-        msg = await asyncio.wait_for(userbot.get_messages(chat, msg_id), timeout=DOWNLOAD_TIMEOUT)
+            # public channel/group via userbot (copy-protected)
+            chat = parts[-2] if len(parts) >= 2 else msg_link
+            msg = await asyncio.wait_for(userbot.get_messages(chat, msg_id), timeout=DOWNLOAD_TIMEOUT)
 
         if not msg:
             await _safe_edit(edit, "❌ Source message was not found or is not accessible to your logged-in account.")
@@ -626,7 +690,7 @@ async def get_msg(userbot, sender, edit_id, msg_link, i, message, keep_status=Fa
 
         caption = await _build_caption(msg, sender)
         size = msg_size(msg)
-        cache_key = f"{chat}:{msg_id}:{size}"
+        cache_key = f"{chat}:{topic_part or 0}:{msg_id}:{size}"
 
         # ⚡ CACHE HIT — instant resend, no download/upload
         cached = await file_id_cache.get(cache_key)

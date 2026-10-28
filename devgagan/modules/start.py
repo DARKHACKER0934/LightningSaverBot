@@ -75,5 +75,11 @@ async def menu_nav(_, cb: CallbackQuery):
             "📊 Use /myplan to check your current plan status, "
             "or /pay to buy premium 💎"
         )
+    elif action == "help":
+        from devgagan.modules.help import HELP_MENU
+        await cb.message.reply(
+            script.HELP_TXT.format(line=script.LINE),
+            reply_markup=HELP_MENU,
+        )
     elif action == "admin":
         await cb.message.reply(script.ADMIN_TXT.format(line=script.LINE))
