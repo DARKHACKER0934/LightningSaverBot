@@ -1,0 +1,46 @@
+{
+  "name": "Newsaverbot - Save Restricted Content Bot",
+  "description": "Save restricted content from Telegram channels and groups.",
+  "keywords": ["python3", "telegram", "telegram-bot", "pyrogram"],
+  "repository": "https://github.com/Shreeraam23/Newsaverbot",
+  "env": {
+    "API_ID": {
+      "description": "Get from https://my.telegram.org",
+      "required": true
+    },
+    "API_HASH": {
+      "description": "Get from https://my.telegram.org",
+      "required": true
+    },
+    "BOT_TOKEN": {
+      "description": "Get from @BotFather on Telegram",
+      "required": true
+    },
+    "MONGO_DB": {
+      "description": "MongoDB connection URL from https://cloud.mongodb.com",
+      "required": true
+    },
+    "OWNER_ID": {
+      "description": "Your Telegram user ID",
+      "required": true
+    },
+    "CHANNEL_ID": {
+      "description": "Force subscribe channel ID (make bot admin)",
+      "required": true
+    },
+    "LOG_GROUP": {
+      "description": "Log channel/group ID (make bot admin)",
+      "required": true
+    },
+    "FREEMIUM_LIMIT": {
+      "description": "Batch size limit for free users (0 = disabled)",
+      "value": "0",
+      "required": true
+    },
+    "PREMIUM_LIMIT": {
+      "description": "Batch size limit for premium users",
+      "value": "5000",
+      "required": true
+    }
+  }
+}
