@@ -9,7 +9,7 @@ from devgagan.core import script
 from devgagan.core.mongo.plans_db import premium_users
 from pyrogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 import cv2
-from pyrogram.errors import FloodWait, InviteHashInvalid, InviteHashExpired, UserAlreadyParticipant, UserNotParticipant
+from pyrogram.errors import FloodWait, InviteHashInvalid, InviteHashExpired, UserAlreadyParticipant, UserNotParticipant, ChannelInvalid, PeerIdInvalid, UsernameNotOccupied
 from datetime import datetime as dt
 import asyncio, subprocess, re, os, time
 import tempfile
@@ -42,19 +42,26 @@ async def gen_link(app,chat_id):
 
 async def subscribe(app, message):
    update_channel = CHANNEL_ID
-   url = await gen_link(app, update_channel)
-   if update_channel:
-      try:
-         user = await app.get_chat_member(update_channel, message.from_user.id)
-         if user.status == "kicked":
-            await message.reply_text("You are Banned. Contact -- @rajputserver")
-            return 1
-      except UserNotParticipant:
-         await message.reply_photo(photo="https://i.postimg.cc/vH7NtYnn/file-00000000df88622fab8ba266a852d070.png", caption=script.FORCE_MSG.format(message.from_user.mention), reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("Join Now...", url=f"{url}")]]))
+   if not update_channel:
+      return 0
+
+   try:
+      url = await gen_link(app, update_channel)
+      user = await app.get_chat_member(update_channel, message.from_user.id)
+      if user.status == "kicked":
+         await message.reply_text("You are Banned. Contact -- @rajputserver")
          return 1
-      except Exception:
-         await message.reply_text("Something Went Wrong. Contact us @rajputserver...")
-         return 1
+   except UserNotParticipant:
+      await message.reply_photo(photo="https://i.postimg.cc/vH7NtYnn/file-00000000df88622fab8ba266a852d070.png", caption=script.FORCE_MSG.format(message.from_user.mention), reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("Join Now...", url=f"{url}")]]))
+      return 1
+   except (ChannelInvalid, PeerIdInvalid, UsernameNotOccupied):
+      # A wrong channel ID must not block /start. Fix CHANNEL_ID and make the bot admin.
+      print(f"WARNING: CHANNEL_ID={update_channel} is invalid or inaccessible; skipping force-subscription check.")
+      return 0
+   except Exception as exc:
+      print(f"Force-subscription check failed: {type(exc).__name__}: {exc}")
+      await message.reply_text("Force-subscription channel is unavailable. Please contact the bot owner.")
+      return 1
 
 
 
