@@ -1,6 +1,6 @@
 {
-  "name": "Newsaverbot - Save Restricted Content Bot",
-  "description": "Save restricted content from Telegram channels and groups.",
+  "name": "Lightning Saver Bot - Ultra Fast Content Saver",
+  "description": "Save restricted content from Telegram channels and groups at lightning speed.",
   "keywords": ["python3", "telegram", "telegram-bot", "pyrogram"],
   "repository": "https://github.com/Shreeraam23/Newsaverbot",
   "env": {
@@ -32,6 +32,10 @@
       "description": "Log channel/group ID (make bot admin)",
       "required": true
     },
+    "ZAPUPI_TOKEN": {
+      "description": "ZapUPI payment provider token",
+      "required": true
+    },
     "FREEMIUM_LIMIT": {
       "description": "Batch size limit for free users (0 = disabled)",
       "value": "0",
@@ -41,6 +45,11 @@
       "description": "Batch size limit for premium users",
       "value": "5000",
       "required": true
+    },
+    "MAX_HEAVY_JOBS": {
+      "description": "Concurrent heavy download/upload jobs",
+      "value": "8",
+      "required": false
     }
   }
 }

@@ -10,12 +10,6 @@ pytz
 flask
 APScheduler
 huggingface_hub
-telethon
-aiojobs
 werkzeug==2.3.8
-PyPDF2
-reportlab
-PyMuPDF
-gunicorn
 aiohttp
 # cryptg

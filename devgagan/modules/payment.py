@@ -144,12 +144,15 @@ def _plans_keyboard():
 
 def _plans_text():
     return (
-        "💎 **Premium Subscription**\n\n"
+        "💎 **PREMIUM SUBSCRIPTION** 💎\n\n"
+        "━━━━━━━━━━━━━━━━━━━━━\n\n"
         "🚀 **Premium Benefits:**\n"
-        "✅ Unlimited file saves\n"
-        "✅ Batch download (50 files)\n"
-        "✅ No 120s waiting time\n"
-        "✅ Priority support\n\n"
+        "⚡ Unlimited file saves\n"
+        "📦 Huge batch downloads\n"
+        "🎯 Turbo priority speed\n"
+        "⏰ No waiting time\n"
+        "🛡 Priority support\n\n"
+        "━━━━━━━━━━━━━━━━━━━━━\n\n"
         "🗓️ **Select your plan:**\n\n"
         "📅 7 Days — ₹30\n"
         "📅 15 Days — ₹50\n"
@@ -219,11 +222,11 @@ async def plan_selected(client, callback: CallbackQuery):
 
     await callback.message.edit_text(
         f"💎 **Premium Subscription**\n\n"
-        f"━━━━━━━━━━━━━━\n"
+        f"━━━━━━━━━━━━━━━━━━━━━\n"
         f"📦 **Selected Plan:** {plan['label']}\n"
         f"💰 **Amount:** ₹{plan['amount']}\n"
-        f"━━━━━━━━━━━━━━\n\n"
-        f"Click below to proceed with UPI payment:",
+        f"━━━━━━━━━━━━━━━━━━━━━\n\n"
+        f"Click below to proceed with UPI payment ⬇️",
         reply_markup=keyboard
     )
 
@@ -271,10 +274,10 @@ async def pay_upi(client, callback: CallbackQuery):
             [InlineKeyboardButton("« Back to Payment Methods", callback_data="back_plans")],
         ])
         await loading_msg.edit_text(
-            f"📋 **Order Summary:**\n"
-            f"• **Service:** Premium Access\n"
-            f"• **Duration:** {plan['label']}\n"
-            f"• **Final Price:** ₹{plan['amount']}\n\n"
+            f"📋 **ORDER SUMMARY**\n\n"
+            f"• 🛍 **Service:** Premium Access\n"
+            f"• 🗓 **Duration:** {plan['label']}\n"
+            f"• 💰 **Final Price:** ₹{plan['amount']}\n\n"
             f"━━━━━━━━━━━━━━\n"
             f"🔖 **Order ID:** `{order_id}`\n"
             f"━━━━━━━━━━━━━━\n\n"
@@ -312,10 +315,10 @@ async def _activate_premium(client, tg_user, record, order_id, message=None):
     expire_ist = expire_date.astimezone(IST).strftime("%d-%m-%Y %I:%M %p")
 
     text = (
-        f"🎉 **Payment Successful!**\n\n"
+        f"🎉 **PAYMENT SUCCESSFUL!**\n\n"
         f"✅ Your {plan_days}-day Premium plan is now active!\n\n"
         f"⌛ **Expiry:** `{expire_ist}` IST\n\n"
-        f"🚀 You can now enjoy all premium features!\n"
+        f"🚀 Enjoy all premium features at lightning speed!\n"
         f"Use /myplan to view your plan details."
     )
     if message:

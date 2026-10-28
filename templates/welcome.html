@@ -3,16 +3,45 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Newsaverbot</title>
+  <title>Lightning Saver Bot ⚡</title>
   <style>
-    body { background: antiquewhite; display: flex; flex-direction: column; justify-content: space-between; min-height: 100vh; margin: 0; font-family: sans-serif; }
-    main { flex: 1; display: grid; place-items: center; padding: 24px; }
-    img { max-width: min(90vw, 640px); height: auto; border-radius: 8px; }
-    footer { text-align: center; padding: 14px; background: antiquewhite; font-size: 1.05em; }
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      background: linear-gradient(135deg, #0f0c29 0%, #302b63 50%, #24243e 100%);
+      display: flex; flex-direction: column; justify-content: space-between;
+      min-height: 100vh; font-family: 'Segoe UI', system-ui, sans-serif; color: #fff;
+    }
+    main { flex: 1; display: grid; place-items: center; padding: 24px; text-align: center; }
+    .card {
+      background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.12);
+      border-radius: 20px; padding: 40px 32px; max-width: 560px;
+      backdrop-filter: blur(10px); box-shadow: 0 20px 60px rgba(0,0,0,0.45);
+    }
+    .badge { font-size: 1.05em; letter-spacing: 2px; color: #ffd166; }
+    h1 { font-size: 1.9em; margin: 10px 0 6px; }
+    p.sub { color: #c9c6e8; font-size: 1em; line-height: 1.6; }
+    .status {
+      display: inline-flex; align-items: center; gap: 8px; margin-top: 22px;
+      background: rgba(38,222,129,0.14); border: 1px solid rgba(38,222,129,0.35);
+      color: #26de81; padding: 10px 18px; border-radius: 999px; font-weight: 600;
+    }
+    .dot { width: 10px; height: 10px; border-radius: 50%; background: #26de81;
+      animation: pulse 1.6s infinite; }
+    @keyframes pulse { 0%,100% { box-shadow: 0 0 0 0 rgba(38,222,129,.5);}
+      50% { box-shadow: 0 0 0 8px rgba(38,222,129,0);} }
+    footer { text-align: center; padding: 16px; color: #9a97c4; font-size: .95em; }
   </style>
 </head>
 <body>
-  <main><img src="{{ url_for('static', filename='gagan.png') }}" alt="Newsaverbot"></main>
-  <footer>Newsaverbot is running.</footer>
+  <main>
+    <div class="card">
+      <div class="badge">⚡ LIGHTNING ENGINE ⚡</div>
+      <h1>Lightning Saver Bot</h1>
+      <p class="sub">Ultra-fast Telegram content saver — public &amp; private channels,<br>
+      turbo batch mode, smooth even with thousands of users.</p>
+      <div class="status"><span class="dot"></span> Bot is running at full speed</div>
+    </div>
+  </main>
+  <footer>Powered by Lightning Engine — butter-smooth, zero lag</footer>
 </body>
 </html>

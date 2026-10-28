@@ -1,47 +1,30 @@
-#devggn
+# devggn — clean, single-start bot core
 
-
-import asyncio
 import logging
-from pyromod import listen
+import os
+
 from pyrogram import Client
 from config import API_ID, API_HASH, BOT_TOKEN
-from telethon.sync import TelegramClient
-
-
-loop = asyncio.get_event_loop()
 
 logging.basicConfig(
     format="[%(levelname) 5s/%(asctime)s] %(name)s: %(message)s",
     level=logging.INFO,
 )
 
-sex = TelegramClient('sexrepo', API_ID, API_HASH).start(bot_token=BOT_TOKEN)
+# Download cache dir (reused media skip re-downloads, cached thumbnails live here)
+os.makedirs("/app/downloads", exist_ok=True)
+os.makedirs("/app/downloads/thumbs", exist_ok=True)
 
 app = Client(
-    ":RestrictBot:",
+    ":LightningBot:",
     api_id=API_ID,
     api_hash=API_HASH,
     bot_token=BOT_TOKEN,
-    workers=10,
-    sleep_threshold=20,
-    max_concurrent_transmissions=5
+    workers=32,
+    sleep_threshold=30,
+    max_concurrent_transmissions=10,
 )
 
-
-
-async def restrict_bot():
-    global BOT_ID, BOT_NAME, BOT_USERNAME
-    await app.start()
-    getme = await app.get_me()
-    BOT_ID = getme.id
-    BOT_USERNAME = getme.username
-    if getme.last_name:
-        BOT_NAME = getme.first_name + " " + getme.last_name
-    else:
-        BOT_NAME = getme.first_name
-
-
-loop.run_until_complete(restrict_bot())
-
-
+BOT_ID = None
+BOT_NAME = ""
+BOT_USERNAME = ""

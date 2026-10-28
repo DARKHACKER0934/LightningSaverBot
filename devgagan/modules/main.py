@@ -1,22 +1,24 @@
-import random
-import string
 import asyncio
-from pyrogram import filters, Client
+import os
+import time
+
+from pyrogram import filters
 from devgagan import app
-from config import API_ID, API_HASH, FREEMIUM_LIMIT, PREMIUM_LIMIT, OWNER_ID
+from config import FREEMIUM_LIMIT, PREMIUM_LIMIT, OWNER_ID
 from devgagan.core.get_func import get_msg
-from devgagan.core.func import *
+from devgagan.core.func import chk_user, subscribe, normalize_link, get_link
+from devgagan.core.pool import userbot_pool
 from devgagan.core.mongo import db
 from pyrogram.errors import FloodWait
-
-
-async def generate_random_name(length=8):
-    return ''.join(random.choices(string.ascii_lowercase, k=length))
-
 
 # One owner task per user. The claim is synchronous and happens before the
 # first await in every handler, so two same-user handlers cannot overlap.
 active_jobs = {}
+
+# Global concurrency guard for heavy download/upload jobs — keeps things
+# butter-smooth even with 1000s of users.
+MAX_HEAVY_JOBS = int(os.environ.get("MAX_HEAVY_JOBS", "8"))
+heavy_semaphore = asyncio.Semaphore(MAX_HEAVY_JOBS)
 
 
 def _claim_job(user_id):
@@ -27,7 +29,6 @@ def _claim_job(user_id):
     active_jobs[user_id] = {
         "task": current,
         "status_id": None,
-        "userbot": None,
         "cancel_requested": False,
     }
     return True
@@ -54,12 +55,40 @@ async def _edit_job_status(user_id, text):
         pass
 
 
-async def _stop_userbot(userbot):
-    if userbot is not None and userbot.is_connected:
-        try:
-            await userbot.stop()
-        except Exception:
-            pass
+async def _get_userbot(user_id):
+    """Acquire a warm userbot from the pool (instant after first login)."""
+    try:
+        data = await asyncio.wait_for(db.get_data(user_id), timeout=10)
+    except asyncio.TimeoutError:
+        await _edit_job_status(user_id, "❌ Mongo timed out while loading your login. Please try again.")
+        return None
+    if not data or not data.get("session"):
+        await _edit_job_status(user_id, "❌ Login in bot first /login karo pehle...")
+        return None
+    try:
+        return await userbot_pool.acquire(user_id, data["session"])
+    except TimeoutError:
+        await _edit_job_status(user_id, "❌ Userbot startup timed out. Please try /login again.")
+        return None
+    except Exception:
+        await _edit_job_status(user_id, "❌ Login expired /login again...")
+        return None
+
+
+def _release_userbot(user_id):
+    try:
+        userbot_pool.release(user_id)
+    except Exception:
+        pass
+
+
+def _parse_parts(link):
+    parts = link.split("/") if link else []
+    is_public_topic = (
+        't.me/' in link and 't.me/c/' not in link and 't.me/+' not in link and
+        't.me/b/' not in link and len(parts) >= 6 and parts[-2].isdigit()
+    )
+    return parts, is_public_topic
 
 
 @app.on_message(filters.regex(r'https?://[^\s]+') & filters.private)
@@ -70,7 +99,6 @@ async def single_link(_, message):
         return
 
     userbot = None
-    link = ""
     try:
         freecheck = await chk_user(message, user_id)
         if freecheck == 1 and FREEMIUM_LIMIT == 0 and user_id not in OWNER_ID:
@@ -83,62 +111,41 @@ async def single_link(_, message):
 
         raw_link = get_link(message.text)
         link = normalize_link(raw_link)
-        msg = await message.reply("Processing...")
+        msg = await message.reply("⚡ **Starting lightning save...**")
         _set_job_status(user_id, msg.id)
 
-        link_parts = link.split("/") if link else []
-        is_public_topic = (
-            't.me/' in link and 't.me/c/' not in link and 't.me/+' not in link and
-            't.me/b/' not in link and len(link_parts) >= 6 and link_parts[-2].isdigit()
-        )
+        _, is_public_topic = _parse_parts(link)
 
         if 't.me/' in link and 't.me/+' not in link and 't.me/c/' not in link and 't.me/b/' not in link and not is_public_topic:
             await get_msg(None, user_id, msg.id, link, 0, message)
             return
 
-        try:
-            data = await asyncio.wait_for(db.get_data(user_id), timeout=10)
-        except asyncio.TimeoutError:
-            await _edit_job_status(user_id, "❌ Mongo timed out while loading your login. Please try again.")
-            return
-        if not data or not data.get("session"):
-            await _edit_job_status(user_id, "❌ Login in bot first /login karo pehle...")
-            return
+        async with heavy_semaphore:
+            userbot = await _get_userbot(user_id)
+            if userbot is None:
+                return
 
-        try:
-            userbot = Client(
-                await generate_random_name(), api_id=API_ID, api_hash=API_HASH,
-                device_model='pyrogram', session_string=data["session"]
-            )
-            active_jobs[user_id]["userbot"] = userbot
-            await asyncio.wait_for(userbot.start(), timeout=30)
-        except asyncio.TimeoutError:
-            await _edit_job_status(user_id, "❌ Userbot startup timed out. Please try /login again.")
-            return
-        except Exception:
-            await _edit_job_status(user_id, "❌ Login expired /login again...")
-            return
-
-        try:
-            if 't.me/+' in link:
-                await msg.edit_text(await userbot_join(userbot, link))
-            elif 't.me/c/' in link or is_public_topic:
-                await get_msg(userbot, user_id, msg.id, link, 0, message)
-            else:
-                await msg.edit_text("Invalid link format.")
-        except asyncio.CancelledError:
-            raise
-        except Exception as exc:
-            await _edit_job_status(user_id, f"❌ Link error: {exc}")
+            try:
+                if 't.me/+' in link:
+                    from devgagan.core.func import userbot_join
+                    await msg.edit_text(await userbot_join(userbot, link))
+                elif 't.me/c/' in link or is_public_topic:
+                    await get_msg(userbot, user_id, msg.id, link, 0, message)
+                else:
+                    await msg.edit_text("❌ Invalid link format.")
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                await _edit_job_status(user_id, f"❌ Link error: {exc}")
     except asyncio.CancelledError:
         await _edit_job_status(user_id, "❌ Processing cancelled.")
         raise
     except FloodWait as fw:
-        await _edit_job_status(user_id, f"Try again after {fw.x} seconds due to floodwait from Telegram.")
+        await _edit_job_status(user_id, f"⚠️ Try again after {fw.x} seconds due to floodwait from Telegram.")
     except Exception as exc:
         await _edit_job_status(user_id, f"❌ Link error: {exc}")
     finally:
-        await _stop_userbot(userbot)
+        _release_userbot(user_id)
         if active_jobs.get(user_id, {}).get("task") is asyncio.current_task():
             active_jobs.pop(user_id, None)
 
@@ -162,7 +169,6 @@ async def stop_batch(_, message):
 
     job["cancel_requested"] = True
     await _edit_job_status(user_id, "⏹ Cancelling current work...")
-    # A handler must never cancel or await itself.
     if task is not asyncio.current_task():
         task.cancel()
         try:
@@ -171,7 +177,76 @@ async def stop_batch(_, message):
             pass
         except Exception:
             pass
-    await app.send_message(user_id, "Processing cancelled. You can start a new task now.")
+    await app.send_message(user_id, "✅ Processing cancelled. You can start a new task now.")
+
+
+class SmartPacer:
+    """Adaptive 3-5s pacing; backs off automatically on FloodWait."""
+
+    def __init__(self):
+        self.interval = 3.0
+
+    async def wait(self):
+        await asyncio.sleep(self.interval)
+
+    def on_floodwait(self, x):
+        self.interval = min(30.0, max(5.0, x + 1))
+
+    def on_success(self):
+        self.interval = max(3.0, self.interval * 0.85)
+
+
+def _batch_target(link):
+    """Return 'public' or 'userbot' for a batch link."""
+    _, is_public_topic = _parse_parts(link)
+    is_public = (
+        't.me/' in link and 't.me/b/' not in link and
+        't.me/c/' not in link and not is_public_topic
+    )
+    return "public" if is_public else "userbot"
+
+
+async def _batch_loop(user_id, message, userbot, start_id, cl, cs, status_id, target, start_time):
+    pacer = SmartPacer()
+    done = 0
+    failed = 0
+    total = cl - cs + 1
+    prefix = '/'.join(start_id.split('/')[:-1])
+
+    for i in range(cs, cl + 1):
+        if not _job_is_running(user_id):
+            return False, done, failed
+        url = f"{prefix}/{i}"
+        link = normalize_link(get_link(url) or url)
+
+        try:
+            await _edit_job_status(
+                user_id,
+                f"⚙️ **BATCH IN PROGRESS**\n\n"
+                f"🔗 Processing `{i - cs + 1}`/`{total}`\n"
+                f"✅ Done: `{done}` | ❌ Failed: `{failed}`\n"
+                f"⏱ Elapsed: `{int(time.time() - start_time)}s`"
+            )
+            ok = await get_msg(userbot, user_id, status_id, link, 0, message, keep_status=True)
+            if ok:
+                done += 1
+                pacer.on_success()
+            else:
+                failed += 1
+        except asyncio.CancelledError:
+            raise
+        except FloodWait as fw:
+            failed += 1
+            pacer.on_floodwait(fw.x)
+            await _edit_job_status(user_id, f"⚠️ Flood limit — pausing `{fw.x}s`...")
+            await asyncio.sleep(min(fw.x, 120) + 1)
+            continue
+        except Exception:
+            failed += 1
+
+        await pacer.wait()
+
+    return True, done, failed
 
 
 @app.on_message(filters.command("batch") & filters.private)
@@ -182,130 +257,63 @@ async def batch_link(_, message):
         return
 
     userbot = None
-    failed_links = False
     try:
         lol = await chk_user(message, user_id)
         max_batch_size = FREEMIUM_LIMIT if lol == 1 else PREMIUM_LIMIT
-        start = await app.ask(user_id, text="Please send the start link.")
+        start = await app.ask(user_id, text="📦 Please send the start link.")
         start_id = normalize_link(start.text.strip())
-        last = await app.ask(user_id, text="Please send the end link.")
+        last = await app.ask(user_id, text="🏁 Please send the end link.")
         last_id = normalize_link(last.text.strip())
 
         try:
             cs = int(start_id.split("/")[-1])
             cl = int(last_id.split("/")[-1])
         except (TypeError, ValueError):
-            await app.send_message(user_id, "Invalid links. Make sure links end with a message number.")
+            await app.send_message(user_id, "❌ Invalid links. Make sure links end with a message number.")
             return
         if user_id not in OWNER_ID and (cl - cs) > max_batch_size:
-            await app.send_message(user_id, f"Batch size exceeds the limit of {max_batch_size}. Upgrade to premium for larger batch sizes.")
+            await app.send_message(user_id, f"❌ Batch size exceeds the limit of `{max_batch_size}`. Upgrade to premium for larger batches.")
             return
 
-        start_parts = start_id.split("/")
-        is_batch_public_topic = (
-            't.me/' in start_id and 't.me/c/' not in start_id and 't.me/+' not in start_id and
-            't.me/b/' not in start_id and len(start_parts) >= 6 and start_parts[-2].isdigit()
-        )
-        status = await app.send_message(user_id, "Starting batch processing...")
+        target = _batch_target(start_id)
+        status = await app.send_message(user_id, "🚀 **Starting TURBO batch processing...**")
         _set_job_status(user_id, status.id)
+        start_time = time.time()
 
-        for i in range(cs, cl + 1):
-            if not _job_is_running(user_id):
-                return
-            msg = None
-            try:
-                result = '/'.join(start_id.split('/')[:-1])
-                url = f"{result}/{i}"
-                link = normalize_link(get_link(url) or url)
-                is_public_link = ('t.me/' in link and 't.me/b/' not in link and
-                                  't.me/c/' not in link and not is_batch_public_topic)
-                if is_public_link:
-                    msg = await app.send_message(user_id, f"Processing link {url}...")
-                    _set_job_status(user_id, msg.id)
-                    if not await get_msg(None, user_id, msg.id, link, 0, message):
-                        failed_links = True
-                        continue
-                    sleep_msg = await app.send_message(user_id, "Sleeping for 15 seconds to avoid flood...")
-                    await asyncio.sleep(20)
-                    await sleep_msg.delete()
-                elif not any(prefix in start_id for prefix in ('t.me/c/', 't.me/b/')) and not is_batch_public_topic:
-                    raise RuntimeError("unsupported link format")
-            except asyncio.CancelledError:
-                raise
-            except Exception as exc:
-                failed_links = True
-                if msg is not None:
-                    try:
-                        await msg.edit_text(f"❌ Link {i} failed: {exc}")
-                    except Exception:
-                        pass
-
-        needs_userbot = any(prefix in start_id for prefix in ('t.me/c/', 't.me/b/')) or is_batch_public_topic
-        if needs_userbot:
-            try:
-                data = await asyncio.wait_for(db.get_data(user_id), timeout=10)
-            except asyncio.TimeoutError:
-                await _edit_job_status(user_id, "❌ Mongo timed out while loading your login.")
-                return
-            if not data or not data.get("session"):
-                await _edit_job_status(user_id, "❌ Login in bot first /login karo pehle...")
-                return
-            try:
-                userbot = Client(
-                    await generate_random_name(), api_id=API_ID, api_hash=API_HASH,
-                    device_model='pyrogram', session_string=data["session"]
-                )
-                active_jobs[user_id]["userbot"] = userbot
-                await asyncio.wait_for(userbot.start(), timeout=30)
-            except asyncio.TimeoutError:
-                await _edit_job_status(user_id, "❌ Userbot startup timed out. Please try /login again.")
-                return
-            except Exception:
-                await _edit_job_status(user_id, "❌ Userbot startup failed. Please try /login again.")
-                return
-
-            for i in range(cs, cl + 1):
-                if not _job_is_running(user_id):
+        if target == "userbot":
+            async with heavy_semaphore:
+                userbot = await _get_userbot(user_id)
+                if userbot is None:
                     return
-                msg = None
-                try:
-                    result = '/'.join(start_id.split('/')[:-1])
-                    url = f"{result}/{i}"
-                    link = normalize_link(get_link(url) or url)
-                    if 't.me/b/' not in link and 't.me/c/' not in link and not is_batch_public_topic:
-                        raise RuntimeError("unsupported link format")
-                    msg = await app.send_message(user_id, f"Processing link {url}...")
-                    _set_job_status(user_id, msg.id)
-                    if not await get_msg(userbot, user_id, msg.id, link, 0, message):
-                        failed_links = True
-                        continue
-                    sleep_msg = await app.send_message(user_id, "Sleeping for 15 seconds to avoid flood...")
-                    await asyncio.sleep(20)
-                    await sleep_msg.delete()
-                    await asyncio.sleep(2)
-                except asyncio.CancelledError:
-                    raise
-                except Exception as exc:
-                    failed_links = True
-                    if msg is not None:
-                        try:
-                            await msg.edit_text(f"❌ Link {i} failed: {exc}")
-                        except Exception:
-                            pass
+                finished, done, failed = await _batch_loop(
+                    user_id, message, userbot, start_id, cl, cs, status.id, start_time
+                )
+        else:
+            finished, done, failed = await _batch_loop(
+                user_id, message, None, start_id, cl, cs, status.id, start_time
+            )
 
-        if _job_is_running(user_id):
-            if failed_links:
-                await _edit_job_status(user_id, "❌ Batch finished with one or more failed links.")
-            else:
-                await app.send_message(user_id, "Batch completed successfully! 🎉")
+        elapsed = int(time.time() - start_time)
+        if finished:
+            emoji = "🎉" if failed == 0 else "⚠️"
+            await _edit_job_status(
+                user_id,
+                f"{emoji} **BATCH COMPLETED!**\n\n"
+                f"✅ Success: `{done}`\n"
+                f"❌ Failed: `{failed}`\n"
+                f"⏱ Total time: `{elapsed}s`\n\n"
+                f"⚡ Powered by lightning engine"
+            )
+        else:
+            await _edit_job_status(user_id, "⏹ Batch stopped.")
     except asyncio.CancelledError:
         await _edit_job_status(user_id, "❌ Batch processing cancelled.")
         raise
     except FloodWait as fw:
-        await _edit_job_status(user_id, f"Try again after {fw.x} seconds due to floodwait from Telegram.")
+        await _edit_job_status(user_id, f"⚠️ Try again after {fw.x} seconds due to floodwait from Telegram.")
     except Exception as exc:
         await _edit_job_status(user_id, f"❌ Batch error: {exc}")
     finally:
-        await _stop_userbot(userbot)
+        _release_userbot(user_id)
         if active_jobs.get(user_id, {}).get("task") is asyncio.current_task():
             active_jobs.pop(user_id, None)

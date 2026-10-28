@@ -1,68 +1,107 @@
-#devgaganin
+# devgaganin — core helpers: progress bar v2, fast metadata, fast thumbs
 
 
+import asyncio
+import json
 import math
-import time , re
-from pyrogram import enums
-from config import CHANNEL_ID, OWNER_ID 
-from devgagan.core import script
-from devgagan.core.mongo.plans_db import premium_users
-from pyrogram.types import InlineKeyboardButton, InlineKeyboardMarkup
-import cv2
-from pyrogram.errors import FloodWait, InviteHashInvalid, InviteHashExpired, UserAlreadyParticipant, UserNotParticipant, ChannelInvalid, PeerIdInvalid, UsernameNotOccupied
-from datetime import datetime as dt
-import asyncio, subprocess, re, os, time
+import os
+import re
+import time
 import tempfile
 
+import cv2
+from pyrogram.types import InlineKeyboardButton, InlineKeyboardMarkup
+from pyrogram.errors import (
+    FloodWait,
+    InviteHashInvalid,
+    InviteHashExpired,
+    UserAlreadyParticipant,
+    UserNotParticipant,
+    ChannelInvalid,
+    PeerIdInvalid,
+    UsernameNotOccupied,
+)
 
-
+from config import CHANNEL_ID, OWNER_ID
+from devgagan.core import script
+from devgagan.core.cache import premium_cache
 
 
 def normalize_link(link):
     """Normalize telegram.me → t.me (Telegram domain change fix)."""
     if not link:
         return link
-    for old in ("https://www.telegram.me/", "https://telegram.me/", "http://telegram.me/"):
+    for old in (
+        "https://www.telegram.me/",
+        "https://telegram.me/",
+        "http://telegram.me/",
+    ):
         link = link.replace(old, "https://t.me/")
     return link
 
+
 async def chk_user(message, user_id):
+    """0 = premium/owner, 1 = free. Premium set is cached 60s (no DB scan)."""
     user = await premium_users()
     if user_id in user or user_id in OWNER_ID:
         return 0
-    else:
-        # await message.reply_text("Purchase premium to do the tasks...")
-        return 1
+    return 1
 
 
+async def premium_users():
+    cached = await premium_cache.get("_all_")
+    if cached is not None:
+        return cached
+    from devgagan.core.mongo.plans_db import premium_users as _load
 
-async def gen_link(app,chat_id):
-   link = await app.export_chat_invite_link(chat_id)
-   return link
+    try:
+        ids = set(await _load())
+    except Exception:
+        ids = set()
+    await premium_cache.set("_all_", ids)
+    return ids
+
+
+async def invalidate_premium_cache():
+    await premium_cache.invalidate("_all_")
+
+
+async def gen_link(app, chat_id):
+    link = await app.export_chat_invite_link(chat_id)
+    return link
+
 
 async def subscribe(app, message):
-   update_channel = CHANNEL_ID
-   if not update_channel:
-      return 0
+    update_channel = CHANNEL_ID
+    if not update_channel:
+        return 0
 
-   try:
-      url = await gen_link(app, update_channel)
-      user = await app.get_chat_member(update_channel, message.from_user.id)
-      if user.status == "kicked":
-         await message.reply_text("You are Banned. Contact -- @rajputserver")
-         return 1
-   except UserNotParticipant:
-      await message.reply_photo(photo="https://i.postimg.cc/vH7NtYnn/file-00000000df88622fab8ba266a852d070.png", caption=script.FORCE_MSG.format(message.from_user.mention), reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("Join Now...", url=f"{url}")]]))
-      return 1
-   except (ChannelInvalid, PeerIdInvalid, UsernameNotOccupied):
-      # A wrong channel ID must not block /start. Fix CHANNEL_ID and make the bot admin.
-      print(f"WARNING: CHANNEL_ID={update_channel} is invalid or inaccessible; skipping force-subscription check.")
-      return 0
-   except Exception as exc:
-      print(f"Force-subscription check failed: {type(exc).__name__}: {exc}")
-      await message.reply_text("Force-subscription channel is unavailable. Please contact the bot owner.")
-      return 1
-
+    try:
+        url = await gen_link(app, update_channel)
+        user = await app.get_chat_member(update_channel, message.from_user.id)
+        if user.status == "kicked":
+            await message.reply_text("You are Banned. Contact -- @rajputserver")
+            return 1
+    except UserNotParticipant:
+        await message.reply_photo(
+            photo="https://i.postimg.cc/vH7NtYnn/file-00000000df88622fab8ba266a852d070.png",
+            caption=script.FORCE_MSG.format(message.from_user.mention),
+            reply_markup=InlineKeyboardMarkup(
+                [[InlineKeyboardButton("Join Now...", url=f"{url}")]]
+            ),
+        )
+        return 1
+    except (ChannelInvalid, PeerIdInvalid, UsernameNotOccupied):
+        print(
+            f"WARNING: CHANNEL_ID={update_channel} is invalid or inaccessible; skipping force-subscription check."
+        )
+        return 0
+    except Exception as exc:
+        print(f"Force-subscription check failed: {type(exc).__name__}: {exc}")
+        await message.reply_text(
+            "Force-subscription channel is unavailable. Please contact the bot owner."
+        )
+        return 1
 
 
 async def get_seconds(time_string):
@@ -84,89 +123,94 @@ async def get_seconds(time_string):
 
     value, unit = extract_value_and_unit(time_string)
 
-    if unit == 's':
+    if unit == "s":
         return value
-    elif unit == 'min':
+    elif unit == "min":
         return value * 60
-    elif unit == 'hour':
+    elif unit == "hour":
         return value * 3600
-    elif unit == 'day':
+    elif unit == "day":
         return value * 86400
-    elif unit == 'month':
+    elif unit == "month":
         return value * 86400 * 30
-    elif unit == 'year':
+    elif unit == "year":
         return value * 86400 * 365
     else:
         return 0
 
 
+# ── Progress bar v2 (smooth, rich, every ~3s) ─────────────────────────────────
+
+BAR_SEGMENTS = 12
+BAR_DONE = "🟩"
+BAR_TODO = "⬛"
 
 
-PROGRESS_BAR = """\n
-**__Completed__** : {1}/{2}
-**__Bytes__** : {0}%
-**__Speed__** : {3}/s
-**__Time__** : {4}
-"""
+def make_bar(percentage: float) -> str:
+    filled = math.floor(percentage / 100 * BAR_SEGMENTS)
+    return BAR_DONE * filled + BAR_TODO * (BAR_SEGMENTS - filled)
+
+
+PROGRESS_TEMPLATE = (
+    "{bar}\n\n"
+    "⚡ **Speed** : `{speed}`\n"
+    "📦 **Done** : `{current}` / `{total}`\n"
+    "📊 **Progress** : `{percent}%`\n"
+    "⏳ **ETA** : `{eta}`"
+)
 
 
 async def progress_bar(current, total, ud_type, message, start):
-
+    """Throttled, smooth progress editor. Updates every ~3s or when done."""
     now = time.time()
     diff = now - start
-    if round(diff % 10.00) == 0 or current == total:
-        # if round(current / total * 100, 0) % 5 == 0:
+    if current != total and diff < 3:
+        return
+    try:
         percentage = current * 100 / total
-        speed = current / diff
-        elapsed_time = round(diff) * 1000
-        time_to_completion = round((total - current) / speed) * 1000
-        estimated_total_time = elapsed_time + time_to_completion
+        speed = current / diff if diff > 0 else 0
+        eta_seconds = int((total - current) / speed) if speed > 0 else 0
 
-        elapsed_time = TimeFormatter(milliseconds=elapsed_time)
-        estimated_total_time = TimeFormatter(milliseconds=estimated_total_time)
-
-        progress = "{0}{1}".format(
-            ''.join(["🟢" for i in range(math.floor(percentage / 10))]),
-            ''.join(["🔴" for i in range(10 - math.floor(percentage / 10))]))
-            
-        tmp = progress + PROGRESS_BAR.format( 
-            round(percentage, 2),
-            humanbytes(current),
-            humanbytes(total),
-            humanbytes(speed),
-            # elapsed_time if elapsed_time != '' else "0 s",
-            estimated_total_time if estimated_total_time != '' else "0 s"
+        text = PROGRESS_TEMPLATE.format(
+            bar=make_bar(percentage),
+            speed=f"{humanbytes(speed)}/s",
+            current=humanbytes(current),
+            total=humanbytes(total),
+            percent=round(percentage, 2),
+            eta=TimeFormatter(eta_seconds * 1000) if eta_seconds else "Almost done ⚡",
         )
         try:
-            await message.edit(
-                text="{}\n\n{}".format(ud_type, tmp),)             
-                
-        except:
+            await message.edit(text=f"{ud_type}\n\n{text}")
+        except Exception:
             pass
+    except Exception:
+        pass
+
 
 def humanbytes(size):
     if not size:
         return ""
     power = 2**10
     n = 0
-    Dic_powerN = {0: ' ', 1: 'K', 2: 'M', 3: 'G', 4: 'T'}
+    dic_power_n = {0: " ", 1: "K", 2: "M", 3: "G", 4: "T"}
     while size > power:
         size /= power
         n += 1
-    return str(round(size, 2)) + " " + Dic_powerN[n] + 'B'
+    return str(round(size, 2)) + " " + dic_power_n[n] + "B"
+
 
 def TimeFormatter(milliseconds: int) -> str:
     seconds, milliseconds = divmod(int(milliseconds), 1000)
     minutes, seconds = divmod(seconds, 60)
     hours, minutes = divmod(minutes, 60)
     days, hours = divmod(hours, 24)
-    tmp = ((str(days) + "d, ") if days else "") + \
-        ((str(hours) + "h, ") if hours else "") + \
-        ((str(minutes) + "m, ") if minutes else "") + \
-        ((str(seconds) + "s, ") if seconds else "") + \
-        ((str(milliseconds) + "ms, ") if milliseconds else "")
-    return tmp[:-2] 
-
+    tmp = (
+        ((str(days) + "d ") if days else "")
+        + ((str(hours) + "h ") if hours else "")
+        + ((str(minutes) + "m ") if minutes else "")
+        + ((str(seconds) + "s ") if seconds else "")
+    )
+    return tmp.strip()
 
 
 def convert(seconds):
@@ -174,10 +218,8 @@ def convert(seconds):
     hour = seconds // 3600
     seconds %= 3600
     minutes = seconds // 60
-    seconds %= 60      
+    seconds %= 60
     return "%d:%02d:%02d" % (hour, minutes, seconds)
-
-
 
 
 async def userbot_join(userbot, invite_link):
@@ -188,17 +230,16 @@ async def userbot_join(userbot, invite_link):
         return "User is already a participant."
     except (InviteHashInvalid, InviteHashExpired):
         return "Could not join. Maybe your link is expired or Invalid."
-    except FloodWait:
-        return "Too many requests, try again later."
+    except FloodWait as fw:
+        return f"Too many requests, try again after {fw.x} seconds."
     except Exception as e:
         print(e)
         return "Could not join, try joining manually."
-    
 
 
 def get_link(string):
     regex = r"(?i)\b((?:https?://|www\d{0,3}[.]|[a-z0-9.\-]+[.][a-z]{2,4}/)(?:[^\s()<>]+|\(([^\s()<>]+|(\([^\s()<>]+\)))*\))+(?:\(([^\s()<>]+|(\([^\s()<>]+\)))*\)|[^\s`!()\[\]{};:'\".,<>?«»“”‘’]))"
-    url = re.findall(regex,string)   
+    url = re.findall(regex, string)
     try:
         link = [x[0] for x in url][0]
         if link:
@@ -209,65 +250,100 @@ def get_link(string):
         return False
 
 
-def video_metadata(file):
-    # FIXED: Changed default values from 1x1 to a safe standard (1280x720)
-    default_values = {'width': 1280, 'height': 720, 'duration': 1} 
+# ── Fast metadata via ffprobe (no frame decode) ───────────────────────────────
+
+async def video_metadata(file):
+    """Read width/height/duration from container headers (fast)."""
+    default_values = {"width": 1280, "height": 720, "duration": 1}
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            "ffprobe",
+            "-v", "quiet",
+            "-print_format", "json",
+            "-show_format",
+            "-show_streams",
+            file,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        out, _ = await asyncio.wait_for(proc.communicate(), timeout=25)
+        if proc.returncode != 0 or not out:
+            return await _cv2_metadata(file)
+        info = json.loads(out.decode("utf-8", "ignore") or "{}")
+        width, height, duration = 0, 0, 0.0
+        for stream in info.get("streams", []):
+            if stream.get("codec_type") == "video" and not width:
+                width = int(stream.get("width") or 0)
+                height = int(stream.get("height") or 0)
+            if not duration and stream.get("duration"):
+                duration = float(stream["duration"])
+        if not duration:
+            duration = float(info.get("format", {}).get("duration") or 0)
+        if width and height and duration:
+            return {"width": width, "height": height, "duration": round(duration)}
+        return await _cv2_metadata(file)
+    except Exception as e:
+        print(f"ffprobe metadata failed: {e}")
+        return await _cv2_metadata(file)
+
+
+def _cv2_metadata(file):
+    default_values = {"width": 1280, "height": 720, "duration": 1}
     try:
         vcap = cv2.VideoCapture(file)
         if not vcap.isOpened():
-            return default_values  # Return defaults if video cannot be opened
-
+            return default_values
         width = round(vcap.get(cv2.CAP_PROP_FRAME_WIDTH))
         height = round(vcap.get(cv2.CAP_PROP_FRAME_HEIGHT))
         fps = vcap.get(cv2.CAP_PROP_FPS)
         frame_count = vcap.get(cv2.CAP_PROP_FRAME_COUNT)
-
-        if fps <= 0:
-            return default_values  # Return defaults if FPS value is zero or negative
-
-        duration = round(frame_count / fps)
-        if duration <= 0:
-            return default_values  # Return defaults if duration is zero or negative
-
         vcap.release()
-        return {'width': width, 'height': height, 'duration': duration}
-
-    except Exception as e:
-        print(f"Error in video_metadata: {e}")
+        if fps > 0 and frame_count > 0:
+            duration = round(frame_count / fps)
+            if duration > 0:
+                return {"width": width, "height": height, "duration": duration}
         return default_values
-    
+    except Exception:
+        return default_values
+
+
+def _extract_frame_cv2(video, out, seek_sec=None, width=320):
+    """In-process frame extraction — much faster than an ffmpeg subprocess."""
+    cap = cv2.VideoCapture(video)
+    try:
+        if seek_sec:
+            cap.set(cv2.CAP_PROP_POS_MSEC, seek_sec * 1000)
+        ret, frame = cap.read()
+        if not ret or frame is None:
+            return False
+        h, w = frame.shape[:2]
+        if w > width:
+            new_h = int(h * width / w)
+            frame = cv2.resize(frame, (width, new_h), interpolation=cv2.INTER_AREA)
+        return cv2.imwrite(out, frame, [cv2.IMWRITE_JPEG_QUALITY, 85])
+    finally:
+        cap.release()
+
+
 def hhmmss(seconds):
-    return time.strftime('%H:%M:%S',time.gmtime(seconds))
+    return time.strftime("%H:%M:%S", time.gmtime(seconds))
+
 
 async def screenshot(video, duration, sender):
-    if os.path.exists(f'{sender}.jpg'):
-        return f'{sender}.jpg'
-    time_stamp = hhmmss(int(duration)/2)
+    """Generate a thumbnail frame using OpenCV (non-blocking, in-process)."""
+    if os.path.exists(f"{sender}.jpg"):
+        return f"{sender}.jpg"
     fd, out = tempfile.mkstemp(prefix="devgagan_thumb_", suffix=".jpg")
     os.close(fd)
-    cmd = ["ffmpeg",
-           "-ss",
-           f"{time_stamp}", 
-           "-i",
-           f"{video}",
-           "-vf",
-           "scale=320:-2",
-           "-frames:v",
-           "1", 
-           "-q:v",
-           "5",
-           f"{out}",
-           "-y"
-          ]
-    process = await asyncio.create_subprocess_exec(
-        *cmd,
-        stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.PIPE
-    )
-    await process.communicate()
-    if process.returncode == 0 and os.path.isfile(out) and os.path.getsize(out) > 0:
+    seek_sec = float(duration) / 2 if duration else None
+    try:
+        ok = await asyncio.get_running_loop().run_in_executor(
+            None, _extract_frame_cv2, video, out, seek_sec, 320
+        )
+    except Exception:
+        ok = False
+    if ok and os.path.isfile(out) and os.path.getsize(out) > 0:
         return out
-    else:
-        if os.path.exists(out):
-            os.remove(out)
-        return None
+    if os.path.exists(out):
+        os.remove(out)
+    return None

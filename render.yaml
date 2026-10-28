@@ -1,8 +1,9 @@
 services:
   - type: worker
-    name: newsaverbot
+    name: lightning-saver-bot
     runtime: docker
     dockerfilePath: ./Dockerfile
+    plan: starter
     envVars:
       - key: API_ID
         sync: false
@@ -11,6 +12,8 @@ services:
       - key: BOT_TOKEN
         sync: false
       - key: MONGO_DB
+        sync: false
+      - key: ZAPUPI_TOKEN
         sync: false
       - key: OWNER_ID
         sync: false
@@ -22,3 +25,7 @@ services:
         value: "0"
       - key: PREMIUM_LIMIT
         value: "5000"
+      - key: MAX_HEAVY_JOBS
+        value: "8"
+      - key: ENABLE_MEDIA_LOGGING
+        value: "false"

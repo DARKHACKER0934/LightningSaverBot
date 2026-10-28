@@ -15,6 +15,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 WORKDIR /app
 
+RUN mkdir -p /app/downloads /app/downloads/thumbs
+
 COPY requirements.txt ./
 RUN python -m pip install --no-cache-dir --upgrade pip wheel \
     && python -m pip install --no-cache-dir -r requirements.txt
@@ -23,5 +25,5 @@ COPY . .
 
 EXPOSE 7860
 
-# Keep the Flask health page available on the Space while the Telegram bot runs.
+# Flask health page runs beside the Telegram bot (Render worker + HF Space friendly).
 CMD ["sh", "-c", "python app.py & exec python -m devgagan"]
