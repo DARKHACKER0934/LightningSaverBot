@@ -268,16 +268,20 @@ def _thumb_file(cache_key):
 async def _cached_shot(cache_key, video, duration):
     key = f"shot:{cache_key}"
     cached = await thumb_cache.get(key)
-    if cached and os.path.isfile(cached):
+    if cached and os.path.isfile(cached) and os.path.getsize(cached) > 0:
         return cached
     out = _thumb_file(cache_key)
-    seek_sec = float(duration) / 2 if duration else None
+    seek_sec = float(duration) / 2 if duration and duration > 1 else 1.0
+    ok = False
     try:
         ok = await asyncio.get_running_loop().run_in_executor(
             None, _extract_frame_cv2, video, out, seek_sec, 320
         )
     except Exception:
         ok = False
+    if not ok:
+        # cv2 can't decode some codecs — fall back to ffmpeg
+        ok = await _ffmpeg_shot(video, out, seek_sec)
     if ok and os.path.isfile(out) and os.path.getsize(out) > 0:
         await thumb_cache.set(key, out)
         return out
@@ -357,6 +361,59 @@ async def _flood_retry(coro_factory, edit, retries=3):
                     pass
             await asyncio.sleep(wait + 2)
     return None
+
+
+async def _ensure_valid_video(file):
+    """Probe video metadata. If unknown (duration<=1), remux to MP4 and re-probe.
+
+    Returns (path, meta). Fixes the '0:01 duration + black thumbnail' problem."""
+    meta = await video_metadata(file)
+    if meta and meta.get("duration", 0) > 1:
+        return file, meta
+
+    # Metadata broken (rare MKV/HEVC files) → fast remux (stream copy)
+    base = file.rsplit(".", 1)[0]
+    out = f"{base}_fixed.mp4"
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            "ffmpeg", "-y", "-loglevel", "error",
+            "-i", file, "-c", "copy", "-movflags", "+faststart", out,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        _, _err = await asyncio.wait_for(proc.communicate(), timeout=600)
+        if proc.returncode == 0 and os.path.isfile(out) and os.path.getsize(out) > 0:
+            meta2 = await video_metadata(out)
+            if meta2 and meta2.get("duration", 0) > 1:
+                try:
+                    os.remove(file)
+                except OSError:
+                    pass
+                return out, meta2
+        if os.path.exists(out):
+            os.remove(out)
+    except Exception as e:
+        print(f"Video remux failed: {e}")
+    return file, meta
+
+
+async def _ffmpeg_shot(video, out, seek_sec):
+    """Frame extraction via ffmpeg (works for any codec cv2 can't decode)."""
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            "ffmpeg", "-y", "-loglevel", "error",
+            "-ss", f"{seek_sec:.2f}",
+            "-i", video,
+            "-vf", "scale=320:-2",
+            "-frames:v", "1", "-q:v", "5",
+            out,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        await asyncio.wait_for(proc.communicate(), timeout=180)
+        return proc.returncode == 0 and os.path.isfile(out) and os.path.getsize(out) > 0
+    except Exception:
+        return False
 
 
 async def _upload_video(cli, target, file, caption, meta, thumb, edit):
@@ -457,15 +514,22 @@ async def _download_upload_media(client, upload_client, sender, target, msg, kin
         file = await _apply_filename_rules(file, sender)
 
         if kind in ("video", "video_doc"):
-            meta = await video_metadata(file)
-            thumb = await get_video_thumbnail(client, msg, file, meta['duration'], sender, cache_key)
-            if thumb and (not os.path.isfile(thumb) or os.path.getsize(thumb) == 0):
-                thumb = None
-            result = await _upload_video(upload_client, target, file, caption, meta, thumb, edit)
+            file, meta = await _ensure_valid_video(file)
+            if meta.get("duration", 0) <= 1:
+                # Can't extract metadata — send as document (video would show 0:01)
+                result = await _upload_document(upload_client, target, file, caption, None, edit)
+            else:
+                thumb = await get_video_thumbnail(client, msg, file, meta['duration'], sender, cache_key)
+                if thumb and (not os.path.isfile(thumb) or os.path.getsize(thumb) == 0):
+                    thumb = None
+                result = await _upload_video(upload_client, target, file, caption, meta, thumb, edit)
         elif kind == "photo":
             result = await upload_client.send_photo(target, file, caption=caption)
         elif kind == "sticker":
-            result = await upload_client.send_sticker(target, file)
+            try:
+                result = await upload_client.send_sticker(target, file)
+            except Exception:
+                result = await _upload_document(upload_client, target, file, caption, None, edit)
         elif kind == "animation":
             result = await upload_client.send_animation(target, file, caption=caption)
         elif kind == "audio":

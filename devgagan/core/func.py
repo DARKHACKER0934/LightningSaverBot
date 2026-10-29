@@ -311,7 +311,7 @@ async def video_metadata(file):
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )
-        out, _ = await asyncio.wait_for(proc.communicate(), timeout=60)
+        out, _ = await asyncio.wait_for(proc.communicate(), timeout=120)
         if proc.returncode != 0 or not out:
             return await _cv2_metadata_async(file)
         info = json.loads(out.decode("utf-8", "ignore") or "{}")
