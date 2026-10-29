@@ -29,8 +29,8 @@ except ImportError:
     def md5():
         return _new("md5")
 
-DL_WORKERS = int(os.getenv("DL_WORKERS", "10"))
-DL_BLOCK = 8 * 1024 * 1024      # bytes per worker request range
+DL_WORKERS = int(os.getenv("DL_WORKERS", "8"))
+DL_BLOCK = 64 * 1024 * 1024  # sequential stream per worker (less CDN re-auth = faster)
 PARALLEL_MIN_SIZE = 12 * 1024 * 1024  # use parallel engine only for bigger files
 
 UPLOAD_CONNECTIONS = int(os.getenv("UPLOAD_CONNECTIONS", "8"))

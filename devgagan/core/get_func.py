@@ -240,12 +240,14 @@ async def send_by_kind(cli, target, kind, source, caption=None):
 
 async def _resize_thumb_inplace(path, max_size=320):
     """Compress a thumbnail to a small JPEG using in-process OpenCV."""
+    if not path or not os.path.isfile(path) or os.path.getsize(path) == 0:
+        return None
     out = path + ".cv2.jpg"
     try:
         ok = await asyncio.get_running_loop().run_in_executor(
             None, _extract_frame_cv2, path, out, None, max_size
         )
-        if ok and os.path.isfile(out) and os.path.getsize(out) <= 200 * 1024:
+        if ok and os.path.isfile(out) and os.path.getsize(out) > 0 and os.path.getsize(out) <= 200 * 1024:
             if os.path.exists(path) and path != out:
                 os.remove(path)
             return out
@@ -253,7 +255,9 @@ async def _resize_thumb_inplace(path, max_size=320):
             os.remove(out)
     except Exception:
         pass
-    return path
+    if os.path.isfile(path) and os.path.getsize(path) > 0:
+        return path
+    return None
 
 
 def _thumb_file(cache_key):
@@ -285,17 +289,18 @@ async def _cached_shot(cache_key, video, duration):
 async def get_custom_thumbnail(sender):
     key = f"custom:{sender}"
     cached = await thumb_cache.get(key)
-    if cached and os.path.isfile(cached):
+    if cached and os.path.isfile(cached) and os.path.getsize(cached) > 0:
         return cached
     settings = await _settings(sender)
     custom_thumb_id = settings.get("thumb")
     if custom_thumb_id:
         try:
             path = await app.download_media(custom_thumb_id, file_name=THUMB_DIR + os.sep)
-            if path and os.path.exists(path):
+            if path and os.path.isfile(path) and os.path.getsize(path) > 0:
                 prepared = await _resize_thumb_inplace(path)
-                await thumb_cache.set(key, prepared)
-                return prepared
+                if prepared:
+                    await thumb_cache.set(key, prepared)
+                    return prepared
         except Exception as e:
             print(f"Could not download custom thumbnail: {e}")
     return None
@@ -309,7 +314,7 @@ async def get_video_thumbnail(client, msg, video_path, duration, sender, cache_k
 
     key = f"thumb:{cache_key}"
     cached = await thumb_cache.get(key)
-    if cached and os.path.isfile(cached):
+    if cached and os.path.isfile(cached) and os.path.getsize(cached) > 0:
         return cached
 
     media = getattr(msg, "video", None) or getattr(msg, "document", None)
@@ -321,9 +326,9 @@ async def get_video_thumbnail(client, msg, video_path, duration, sender, cache_k
         )
         try:
             thumb_path = await client.download_media(source_thumb.file_id, file_name=THUMB_DIR + os.sep)
-            if thumb_path and os.path.exists(thumb_path):
+            if thumb_path and os.path.isfile(thumb_path) and os.path.getsize(thumb_path) > 0:
                 prepared = await _resize_thumb_inplace(thumb_path)
-                if os.path.isfile(prepared):
+                if prepared and os.path.isfile(prepared) and os.path.getsize(prepared) > 0:
                     await thumb_cache.set(key, prepared)
                     return prepared
         except Exception as e:
@@ -446,14 +451,16 @@ async def _download_upload_media(client, upload_client, sender, target, msg, kin
             progress=progress_bar,
             progress_args=("📥 **DOWNLOADING:**\n", edit, time.time()),
         )
-        if not file:
-            raise RuntimeError("Download failed")
+        if not file or not os.path.isfile(file) or os.path.getsize(file) == 0:
+            raise RuntimeError("Download failed: empty file received — source file may be unavailable. Try again.")
 
         file = await _apply_filename_rules(file, sender)
 
         if kind in ("video", "video_doc"):
             meta = await video_metadata(file)
             thumb = await get_video_thumbnail(client, msg, file, meta['duration'], sender, cache_key)
+            if thumb and (not os.path.isfile(thumb) or os.path.getsize(thumb) == 0):
+                thumb = None
             result = await _upload_video(upload_client, target, file, caption, meta, thumb, edit)
         elif kind == "photo":
             result = await upload_client.send_photo(target, file, caption=caption)
@@ -469,6 +476,8 @@ async def _download_upload_media(client, upload_client, sender, target, msg, kin
             result = await upload_client.send_video_note(target, file)
         else:
             thumb = await get_custom_thumbnail(sender)
+            if thumb and (not os.path.isfile(thumb) or os.path.getsize(thumb) == 0):
+                thumb = None
             result = await _upload_document(upload_client, target, file, caption, thumb, edit)
 
         if result:
