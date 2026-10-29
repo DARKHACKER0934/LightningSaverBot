@@ -279,9 +279,9 @@ async def video_metadata(file):
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )
-        out, _ = await asyncio.wait_for(proc.communicate(), timeout=25)
+        out, _ = await asyncio.wait_for(proc.communicate(), timeout=60)
         if proc.returncode != 0 or not out:
-            return await _cv2_metadata(file)
+            return await _cv2_metadata_async(file)
         info = json.loads(out.decode("utf-8", "ignore") or "{}")
         width, height, duration = 0, 0, 0.0
         for stream in info.get("streams", []):
@@ -294,10 +294,15 @@ async def video_metadata(file):
             duration = float(info.get("format", {}).get("duration") or 0)
         if width and height and duration:
             return {"width": width, "height": height, "duration": round(duration)}
-        return await _cv2_metadata(file)
+        return await _cv2_metadata_async(file)
     except Exception as e:
         print(f"ffprobe metadata failed: {e}")
-        return await _cv2_metadata(file)
+        return await _cv2_metadata_async(file)
+
+
+async def _cv2_metadata_async(file):
+    loop = asyncio.get_running_loop()
+    return await loop.run_in_executor(None, _cv2_metadata, file)
 
 
 def _cv2_metadata(file):

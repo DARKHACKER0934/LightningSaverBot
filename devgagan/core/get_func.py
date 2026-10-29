@@ -179,6 +179,14 @@ def _media_of(msg):
     return None
 
 
+def _ext_for(client, media):
+    mime = getattr(media, "mime_type", "") or ""
+    try:
+        return client.guess_extension(mime) or "bin"
+    except Exception:
+        return "bin"
+
+
 def media_file_id(msg):
     m = getattr(msg, msg.media.value if msg.media else None, None)
     if m is None:
@@ -448,6 +456,16 @@ async def _download_upload_media(client, upload_client, sender, target, msg, kin
             result = await _upload_video(upload_client, target, file, caption, meta, thumb, edit)
         elif kind == "photo":
             result = await upload_client.send_photo(target, file, caption=caption)
+        elif kind == "sticker":
+            result = await upload_client.send_sticker(target, file)
+        elif kind == "animation":
+            result = await upload_client.send_animation(target, file, caption=caption)
+        elif kind == "audio":
+            result = await upload_client.send_audio(target, file, caption=caption)
+        elif kind == "voice":
+            result = await upload_client.send_voice(target, file)
+        elif kind == "video_note":
+            result = await upload_client.send_video_note(target, file)
         else:
             thumb = await get_custom_thumbnail(sender)
             result = await _upload_document(upload_client, target, file, caption, thumb, edit)

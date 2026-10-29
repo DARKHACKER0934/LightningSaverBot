@@ -1,0 +1,12 @@
+app = ""
+primary_region = "sin"
+
+[build]
+  dockerfile = "Dockerfile"
+
+[experimental]
+  auto_rollback = true
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "1gb"
