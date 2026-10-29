@@ -9,7 +9,7 @@ from devgagan.core.get_func import get_msg
 from devgagan.core.func import chk_user, subscribe, normalize_link, get_link
 from devgagan.core.pool import userbot_pool
 from devgagan.core.mongo import db
-from pyrogram.errors import FloodWait
+from pyrogram.errors import AuthKeyDuplicated, FloodWait
 
 # One owner task per user. The claim is synchronous and happens before the
 # first await in every handler, so two same-user handlers cannot overlap.
@@ -69,6 +69,16 @@ async def _get_userbot(user_id):
         return await userbot_pool.acquire(user_id, data["session"])
     except TimeoutError:
         await _edit_job_status(user_id, "❌ Userbot startup timed out. Please try /login again.")
+        return None
+    except AuthKeyDuplicated:
+        await db.delete_session(user_id)
+        await userbot_pool.drop(user_id)
+        await _edit_job_status(
+            user_id,
+            "❌ Aapka login do jagah ek saath use ho raha hai (dusra bot/device). "
+            "Telegram ne session block kar diya hai.\n\n"
+            "➡️ Isi bot pe /login dobara karo, aur dusra bot (Fly/Render/VPS) band ya suspend kar do."
+        )
         return None
     except Exception:
         await _edit_job_status(user_id, "❌ Login expired /login again...")

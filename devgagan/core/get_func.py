@@ -15,8 +15,9 @@ import time
 
 from pyrogram import raw, types
 from pyrogram.errors import (
-    ChannelBanned, ChannelInvalid, ChannelPrivate, ChatIdInvalid, ChatInvalid,
-    FloodWait, PeerIdInvalid, RPCError, ChatAdminRequired,
+    AuthKeyDuplicated, ChannelBanned, ChannelInvalid, ChannelPrivate,
+    ChatIdInvalid, ChatInvalid, FloodWait, PeerIdInvalid, RPCError,
+    ChatAdminRequired,
 )
 from pyrogram.enums import MessageMediaType
 
@@ -737,6 +738,25 @@ async def get_msg(userbot, sender, edit_id, msg_link, i, message, keep_status=Fa
 
     except asyncio.CancelledError:
         raise
+    except AuthKeyDuplicated:
+        # Same session active in two places → Telegram killed the auth key.
+        try:
+            await settings_db.delete_session(sender)
+        except Exception:
+            pass
+        try:
+            from devgagan.core.pool import userbot_pool
+            await userbot_pool.drop(sender)
+        except Exception:
+            pass
+        await _safe_edit(
+            edit,
+            "❌ **Login do jagah use ho raha hai!**\n"
+            "Telegram ne session block kar diya.\n\n"
+            "➡️ Isi bot pe /login dobara karo — aur dusra bot "
+            "(Fly/Render/VPS) band karo, warna yeh baar baar hoga."
+        )
+        return False
     except (ChannelBanned, ChannelInvalid, ChannelPrivate, ChatIdInvalid, ChatInvalid):
         await _safe_edit(edit, "❌ Have you joined the channel? If yes, try /login again.")
         return False

@@ -6,6 +6,7 @@ import string
 import time
 
 from pyrogram import Client
+from pyrogram.errors import AuthKeyDuplicated
 from config import API_ID, API_HASH
 
 IDLE_TIMEOUT = 600          # keep userbot warm for 10 min after last use
@@ -77,6 +78,14 @@ class UserbotPool:
             except Exception:
                 pass
             raise TimeoutError("Userbot startup timed out.")
+        except AuthKeyDuplicated:
+            # The same session string is active somewhere else (another bot
+            # instance or device). Telegram invalidates it — force a fresh login.
+            try:
+                await client.stop()
+            except Exception:
+                pass
+            raise AuthKeyDuplicated
         except Exception:
             try:
                 await client.stop()
