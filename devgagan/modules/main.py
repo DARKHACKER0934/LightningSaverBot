@@ -139,7 +139,7 @@ async def single_link(_, message):
                 if 't.me/+' in link:
                     from devgagan.core.func import userbot_join
                     await msg.edit_text(await userbot_join(userbot, link))
-                elif 't.me/c/' in link or is_public_topic:
+                elif 't.me/c/' in link or 't.me/b/' in link or is_public_topic:
                     await get_msg(userbot, user_id, msg.id, link, 0, message)
                 else:
                     await msg.edit_text("❌ Invalid link format.")
@@ -268,6 +268,9 @@ async def batch_link(_, message):
 
     userbot = None
     try:
+        join = await subscribe(_, message)
+        if join == 1:
+            return
         lol = await chk_user(message, user_id)
         max_batch_size = FREEMIUM_LIMIT if lol == 1 else PREMIUM_LIMIT
         start = await app.ask(user_id, text="📦 Please send the start link.")

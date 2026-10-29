@@ -49,6 +49,11 @@ async def delete_session_files(user_id):
 async def clear_db(client, message):
     user_id = message.chat.id
     files_deleted = await delete_session_files(user_id)
+    try:
+        from devgagan.core.pool import userbot_pool
+        await userbot_pool.drop(user_id)
+    except Exception:
+        pass
 
     if files_deleted:
         await message.reply("✅ **Logged out!** Your session data has been cleared from memory and disk.")
@@ -132,6 +137,11 @@ async def generate_session(_, message):
     string_session = await client.export_session_string()
     await db.set_session(user_id, string_session)
     await client.disconnect()
+    try:
+        from devgagan.core.pool import userbot_pool
+        await userbot_pool.drop(user_id)
+    except Exception:
+        pass
     await otp_code.reply(
         "🎉 **LOGIN SUCCESSFUL!**\n\n"
         "✅ Your session is now active.\n"

@@ -33,7 +33,7 @@ PLANS = {
 }
 
 IST = pytz.timezone("Asia/Kolkata")
-BOT_URL = "http://t.me/Mjolnir369bot"
+BOT_URL = "http://t.me/testfastsavebot"
 
 
 async def _private_payment_callback(callback: CallbackQuery) -> bool:

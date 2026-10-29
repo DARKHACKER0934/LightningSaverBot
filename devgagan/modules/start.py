@@ -4,7 +4,28 @@ from pyrogram.types import CallbackQuery, InlineKeyboardMarkup, InlineKeyboardBu
 from devgagan import app
 from devgagan.core import script
 from devgagan.core.func import subscribe
-from config import OWNER_ID
+from config import OWNER_ID, CHANNEL_ID
+
+
+# ── "I've Joined" verification button ─────────────────────────────────────────
+
+@app.on_callback_query(filters.regex(r"^verifyjoin_(\d+)$"))
+async def verify_join(_, cb: CallbackQuery):
+    uid = int(cb.matches[0].group(1))
+    if cb.from_user.id != uid:
+        return await cb.answer("This button is not for you.", show_alert=True)
+    try:
+        member = await app.get_chat_member(CHANNEL_ID, uid)
+        if member.status in ("kicked", "banned", "restricted"):
+            await cb.answer("🚫 You are banned from the channel.", show_alert=True)
+            return
+        await cb.answer("✅ Verified! Ab /start ya link dobara bhejo.", show_alert=True)
+        try:
+            await cb.message.delete()
+        except Exception:
+            pass
+    except Exception:
+        await cb.answer("❌ Abhi tak joined nahi ho. Pehle channel join karo, phir click karo.", show_alert=True)
 
 # ── Main menu buttons ─────────────────────────────────────────────────────────
 

@@ -107,7 +107,7 @@ async def settings_input(_, message: Message):
         data = await db.get_data(uid) or {}
         rules = dict(data.get("replacement_words") or {})
         rules[old] = text
-        save_replacement_words(uid, rules)
+        await save_replacement_words(uid, rules)
         await db.set_replace_words(uid, rules)
     elif action == "set_cleanwords":
         additions = [w.strip() for w in text.split(",") if w.strip()]

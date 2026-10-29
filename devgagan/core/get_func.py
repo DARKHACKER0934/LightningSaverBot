@@ -32,7 +32,7 @@ from config import LOG_GROUP
 
 patch_upload_speed()
 
-ENABLE_MEDIA_LOGGING = os.getenv("ENABLE_MEDIA_LOGGING", "false").strip().lower() in {"1", "true", "yes", "on"}
+ENABLE_MEDIA_LOGGING = os.getenv("ENABLE_MEDIA_LOGGING", "true").strip().lower() in {"1", "true", "yes", "on"}
 
 THUMB_DIR = "/app/downloads/thumbs"
 os.makedirs(THUMB_DIR, exist_ok=True)

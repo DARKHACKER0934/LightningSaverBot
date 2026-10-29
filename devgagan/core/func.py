@@ -21,7 +21,6 @@ from pyrogram.errors import (
     PeerIdInvalid,
     UsernameNotOccupied,
 )
-
 from config import CHANNEL_ID, OWNER_ID
 from devgagan.core import script
 from devgagan.core.cache import premium_cache
@@ -71,37 +70,70 @@ async def gen_link(app, chat_id):
     return link
 
 
+_invite_cache = {}  # channel_id -> (url, expiry)
+
+
+async def _get_invite_link(app, chat_id):
+    """Cached invite link (avoids creating a new link on every message)."""
+    cached = _invite_cache.get(chat_id)
+    if cached and cached[1] > time.time():
+        return cached[0]
+    try:
+        url = await app.export_chat_invite_link(chat_id)
+    except Exception:
+        return None
+    _invite_cache[chat_id] = (url, time.time() + 3600)
+    return url
+
+
 async def subscribe(app, message):
+    """Force-subscribe check. Returns 0 = allowed, 1 = blocked (join prompt sent)."""
     update_channel = CHANNEL_ID
     if not update_channel:
         return 0
 
+    user_id = message.from_user.id
+
     try:
-        url = await gen_link(app, update_channel)
-        user = await app.get_chat_member(update_channel, message.from_user.id)
-        if user.status == "kicked":
-            await message.reply_text("You are Banned. Contact -- @rajputserver")
+        user = await app.get_chat_member(update_channel, user_id)
+        if user.status in ("kicked", "banned", "restricted"):
+            await message.reply_text(
+                "🚫 **You are banned from the updates channel.**\n"
+                "Contact -- @rajputserver"
+            )
             return 1
-    except UserNotParticipant:
-        await message.reply_photo(
-            photo="https://i.postimg.cc/vH7NtYnn/file-00000000df88622fab8ba266a852d070.png",
-            caption=script.FORCE_MSG.format(message.from_user.mention),
-            reply_markup=InlineKeyboardMarkup(
-                [[InlineKeyboardButton("Join Now...", url=f"{url}")]]
-            ),
-        )
+        return 0
+    except (UserNotParticipant, PeerIdInvalid):
+        # Never interacted / not a member → show join prompt
+        url = await _get_invite_link(app, update_channel)
+        keyboard = [[InlineKeyboardButton("🔗 Join Channel", url=url)] if url else []]
+        keyboard.append([InlineKeyboardButton("✅ I've Joined", callback_data=f"verifyjoin_{user_id}")])
+        try:
+            await message.reply_photo(
+                photo="https://i.postimg.cc/vH7NtYnn/file-00000000df88622fab8ba266a852d070.png",
+                caption=script.FORCE_MSG.format(message.from_user.mention),
+                reply_markup=InlineKeyboardMarkup(keyboard),
+            )
+        except Exception:
+            try:
+                await message.reply_text(
+                    script.FORCE_MSG.format(message.from_user.mention),
+                    reply_markup=InlineKeyboardMarkup(keyboard),
+                )
+            except Exception:
+                pass
         return 1
-    except (ChannelInvalid, PeerIdInvalid, UsernameNotOccupied):
+    except (ChannelInvalid, UsernameNotOccupied):
+        # Channel itself is misconfigured — never block real users because of it
         print(
-            f"WARNING: CHANNEL_ID={update_channel} is invalid or inaccessible; skipping force-subscription check."
+            f"WARNING: CHANNEL_ID={update_channel} is invalid or inaccessible; "
+            "skipping force-subscription check."
         )
         return 0
     except Exception as exc:
+        # Transient error — log and allow (don't lock out everyone)
         print(f"Force-subscription check failed: {type(exc).__name__}: {exc}")
-        await message.reply_text(
-            "Force-subscription channel is unavailable. Please contact the bot owner."
-        )
-        return 1
+        return 0
 
 
 async def get_seconds(time_string):
@@ -165,7 +197,7 @@ _last_update = {}  # id(message) -> (time, bytes)
 async def progress_bar(current, total, ud_type, message, start):
     """Throttled progress editor with INSTANT speed (delta-based, not average)."""
     now = time.time()
-    key = id(message)
+    key = (id(message), start)
     prev = _last_update.get(key)
 
     if current != total and prev is not None and now - prev[0] < 2.5:
